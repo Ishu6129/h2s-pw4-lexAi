@@ -8,7 +8,8 @@
 
   [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
   [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org)
-  [![Groq AI](https://img.shields.io/badge/Groq-Llama%203.3-orange)](https://groq.com)
+  [![Groq AI](https://img.shields.io/badge/Groq-GPT--OSS-orange)](https://groq.com)
+  [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-success?logo=vercel)](https://lexai-six-beryl.vercel.app/)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 </div>
 
