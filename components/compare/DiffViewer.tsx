@@ -10,11 +10,6 @@ const TYPE_ICONS = {
   same: null,
 };
 
-const SIGNIFICANCE_LABEL: Record<string, string> = {
-  critical: '⚠️ Critical',
-  notable: 'Notable',
-  minor: 'Minor',
-};
 
 function DeltaCard({ diff }: { diff: DiffEntry }) {
   const colors = {

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { ChecklistItem } from '@/types/analysis';
-import { CheckSquare, Square, Download } from 'lucide-react';
+import { Download } from 'lucide-react';
 
 const PRIORITY_COLORS = {
   urgent: 'var(--risk-high)',
@@ -26,7 +26,11 @@ export default function Checklist({ items }: ChecklistProps) {
   const toggle = (id: string) =>
     setChecked((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
 

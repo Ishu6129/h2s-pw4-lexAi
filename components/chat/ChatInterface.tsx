@@ -14,7 +14,7 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
       id: 'welcome',
       role: 'assistant',
       content: `I've read **${documentTitle}**. Ask me anything about this document — obligations, risks, clauses, termination conditions, or anything else you'd like to understand.`,
-      timestamp: Date.now(),
+      timestamp: 0,
     },
   ]);
   const [input, setInput] = useState('');
@@ -29,18 +29,19 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
   const sendMessage = async (question: string) => {
     if (!question.trim() || isStreaming) return;
 
+    const now = new Date().getTime();
     const userMsg: Message = {
-      id: `user-${Date.now()}`,
+      id: `user-${now}`,
       role: 'user',
       content: question,
-      timestamp: Date.now(),
+      timestamp: now,
     };
-    const assistantId = `assistant-${Date.now()}`;
+    const assistantId = `assistant-${now + 1}`;
     const assistantMsg: Message = {
       id: assistantId,
       role: 'assistant',
       content: '',
-      timestamp: Date.now(),
+      timestamp: now + 1,
       isStreaming: true,
     };
 
@@ -64,7 +65,7 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = '';
+      let currentText = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -79,10 +80,11 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
           try {
             const parsed = JSON.parse(data);
             if (parsed.chunk) {
-              accumulated += parsed.chunk;
+              currentText += parsed.chunk;
+              const nextContent = currentText;
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: accumulated } : m
+                  m.id === assistantId ? { ...m, content: nextContent } : m
                 )
               );
             }
@@ -93,6 +95,7 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
         }
       }
     } catch (err) {
+      console.error('[ChatInterface] QA Error:', err);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId

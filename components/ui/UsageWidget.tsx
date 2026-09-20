@@ -111,8 +111,12 @@ export default function UsageWidget() {
 
   // Initial load + poll every 10s + listen for instant API usage events
   useEffect(() => {
-    fetchUsage();
-    const timer = setInterval(fetchUsage, 10_000);
+    const initTimer = setTimeout(() => {
+      void fetchUsage();
+    }, 0);
+    const timer = setInterval(() => {
+      void fetchUsage();
+    }, 10_000);
     const handleApiUsed = (e: Event) => {
       const customEv = e as CustomEvent;
       if (customEv.detail) {
@@ -145,7 +149,7 @@ export default function UsageWidget() {
           return updated;
         });
       }
-      fetchUsage();
+      void fetchUsage();
     };
 
     if (typeof window !== 'undefined') {
@@ -153,6 +157,7 @@ export default function UsageWidget() {
     }
 
     return () => {
+      clearTimeout(initTimer);
       clearInterval(timer);
       if (typeof window !== 'undefined') {
         window.removeEventListener('lexai-api-used', handleApiUsed);
@@ -162,7 +167,6 @@ export default function UsageWidget() {
 
   // Compute global health
   const globalPct = data ? (data.global.remaining / data.global.capacity) : 1;
-  const isHealthy = globalPct >= 0.5;
   const isWarning = globalPct > 0 && globalPct < 0.5;
   const isExhausted = globalPct === 0;
 

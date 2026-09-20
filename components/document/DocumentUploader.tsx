@@ -67,6 +67,49 @@ function extractRawPdfTextFallback(arrayBuffer: ArrayBuffer): string {
   }
 }
 
+async function extractPdfText(file: File): Promise<string> {
+  try {
+    const pdfjs = await import('pdfjs-dist');
+    if (typeof window !== 'undefined' && pdfjs.GlobalWorkerOptions) {
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+    }).promise;
+
+    const pages: string[] = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => ('str' in item ? item.str : ''))
+        .filter(Boolean)
+        .join(' ');
+      if (pageText.trim()) {
+        pages.push(pageText.trim());
+      }
+    }
+
+    return pages.join('\n\n');
+  } catch (err) {
+    console.error('PDF parsing error:', err);
+    try {
+      const buffer = await file.arrayBuffer();
+      const raw = extractRawPdfTextFallback(buffer);
+      if (raw.trim().length > 30) return raw;
+    } catch {
+      // ignore fallback errors
+    }
+    throw new Error(
+      'Could not extract text from PDF. If this is a scanned PDF, please paste the text directly using the "Paste text" option.'
+    );
+  }
+}
+
 export default function DocumentUploader({
   onTextExtracted,
   label = 'Upload Document',
@@ -157,50 +200,6 @@ export default function DocumentUploader({
     },
     [onTextExtracted]
   );
-
-  async function extractPdfText(file: File): Promise<string> {
-    try {
-      const pdfjs = await import('pdfjs-dist');
-      if (typeof window !== 'undefined' && pdfjs.GlobalWorkerOptions) {
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-      }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjs.getDocument({
-        data: new Uint8Array(arrayBuffer),
-        useSystemFonts: true,
-      }).promise;
-
-      const pages: string[] = [];
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items
-          .map((item) => ('str' in item ? item.str : ''))
-          .filter(Boolean)
-          .join(' ');
-        if (pageText.trim()) {
-          pages.push(pageText.trim());
-        }
-      }
-
-      return pages.join('\n\n');
-    } catch (err) {
-      console.error('PDF parsing error:', err);
-      // Try raw buffer extraction before throwing error
-      try {
-        const buffer = await file.arrayBuffer();
-        const raw = extractRawPdfTextFallback(buffer);
-        if (raw.trim().length > 30) return raw;
-      } catch {
-        // ignore fallback errors
-      }
-      throw new Error(
-        'Could not extract text from PDF. If this is a scanned PDF, please paste the text directly using the "Paste text" option.'
-      );
-    }
-  }
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
