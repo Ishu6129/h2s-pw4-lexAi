@@ -43,6 +43,9 @@ export default function AnalyzePage() {
       setResult(data.data);
       setProcessingTime(data.data.processingTimeMs);
       setTab('summary');
+      if (typeof window !== 'undefined' && data.rateLimit) {
+        window.dispatchEvent(new CustomEvent('lexai-api-used', { detail: data.rateLimit }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

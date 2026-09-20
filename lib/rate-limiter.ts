@@ -1,7 +1,7 @@
 /**
  * lib/rate-limiter.ts
  * Per-IP token-bucket rate limiter with global & endpoint-specific tracking.
- * Accurately deducts from both endpoint and global buckets.
+ * Uses globalThis singleton to persist store across Node reloads.
  */
 import { NextRequest } from 'next/server';
 
@@ -26,7 +26,14 @@ interface UsageEntry {
   [endpoint: string]: Bucket;
 }
 
-const store = new Map<string, UsageEntry>();
+// Preserve store across HMR and module reloads using globalThis singleton
+const globalForRateLimit = globalThis as unknown as {
+  rateLimitStore?: Map<string, UsageEntry>;
+};
+
+const store = globalForRateLimit.rateLimitStore ?? new Map<string, UsageEntry>();
+globalForRateLimit.rateLimitStore = store;
+
 const WINDOW_MS = 60_000; // 1 minute sliding window
 
 /** Consistently extract IP address across all API routes */
@@ -72,6 +79,8 @@ export interface RateLimitResult {
   used: number;
   resetInMs: number;
   endpoint: EndpointKey;
+  globalRemaining: number;
+  globalCapacity: number;
 }
 
 /**
@@ -92,6 +101,8 @@ export function checkRateLimit(ip: string, endpoint: EndpointKey = 'global'): Ra
       used: epBucket.used,
       resetInMs: Math.max(0, epBucket.resetAt - now),
       endpoint,
+      globalRemaining: globalBucket.tokens,
+      globalCapacity: globalBucket.capacity,
     };
   }
 
@@ -104,6 +115,8 @@ export function checkRateLimit(ip: string, endpoint: EndpointKey = 'global'): Ra
       used: globalBucket.used,
       resetInMs: Math.max(0, globalBucket.resetAt - now),
       endpoint: 'global',
+      globalRemaining: 0,
+      globalCapacity: globalBucket.capacity,
     };
   }
 
@@ -124,6 +137,8 @@ export function checkRateLimit(ip: string, endpoint: EndpointKey = 'global'): Ra
     used: epBucket.used,
     resetInMs: Math.max(0, epBucket.resetAt - now),
     endpoint,
+    globalRemaining: globalBucket.tokens,
+    globalCapacity: globalBucket.capacity,
   };
 }
 
@@ -142,6 +157,8 @@ export function getUsageSnapshot(ip: string): Record<string, Omit<RateLimitResul
       used: bucket.used,
       resetInMs: Math.max(0, bucket.resetAt - now),
       endpoint: key,
+      globalRemaining: getOrRefillBucket(ip, 'global').tokens,
+      globalCapacity: RATE_LIMITS.global.perMinute,
     };
   }
 

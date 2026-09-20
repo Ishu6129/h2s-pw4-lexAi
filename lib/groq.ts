@@ -104,6 +104,7 @@ export async function* groqStream(
  */
 export function parseGroqJSON<T>(raw: string): T {
   const cleaned = raw
+    .trim()
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
     .replace(/```\s*$/i, '')

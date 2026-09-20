@@ -113,7 +113,40 @@ export default function UsageWidget() {
   useEffect(() => {
     fetchUsage();
     const timer = setInterval(fetchUsage, 10_000);
-    const handleApiUsed = () => fetchUsage();
+    const handleApiUsed = (e: Event) => {
+      const customEv = e as CustomEvent;
+      if (customEv.detail) {
+        const { endpoint, remaining, capacity, resetInMs, globalRemaining } = customEv.detail;
+        setData((prev) => {
+          const current = prev ?? {
+            analyze: { remaining: 10, capacity: 10, used: 0, resetInMs: 60000, endpoint: 'analyze' },
+            compare: { remaining: 6, capacity: 6, used: 0, resetInMs: 60000, endpoint: 'compare' },
+            qa: { remaining: 20, capacity: 20, used: 0, resetInMs: 60000, endpoint: 'qa' },
+            checklist: { remaining: 10, capacity: 10, used: 0, resetInMs: 60000, endpoint: 'checklist' },
+            global: { remaining: 30, capacity: 30, used: 0, resetInMs: 60000, endpoint: 'global' },
+          };
+
+          const updated = { ...current };
+          if (endpoint && endpoint in updated) {
+            const key = endpoint as keyof UsageData;
+            updated[key] = {
+              ...updated[key],
+              remaining: typeof remaining === 'number' ? remaining : Math.max(0, updated[key].remaining - 1),
+              capacity: capacity ?? updated[key].capacity,
+              resetInMs: resetInMs ?? updated[key].resetInMs,
+            };
+          }
+
+          updated.global = {
+            ...updated.global,
+            remaining: typeof globalRemaining === 'number' ? globalRemaining : Math.max(0, updated.global.remaining - 1),
+          };
+
+          return updated;
+        });
+      }
+      fetchUsage();
+    };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('lexai-api-used', handleApiUsed);

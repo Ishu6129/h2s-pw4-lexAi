@@ -84,6 +84,12 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         data: { ...validated.data, processingTimeMs: Date.now() - start },
+        rateLimit: {
+          endpoint: 'analyze',
+          remaining,
+          capacity: 10,
+          resetInMs,
+        },
       },
       { headers: { 'X-RateLimit-Remaining': String(remaining) } }
     );
