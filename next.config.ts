@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react'],
   },
+  // Empty turbopack config prevents the webpack/turbopack conflict warning in Next.js 16
+  turbopack: {},
   async headers() {
     return [
       {

@@ -8,7 +8,7 @@ import { SYSTEM_ANALYZE, buildAnalyzePrompt } from '@/lib/prompt-templates';
 import { AnalyzeRequestSchema, AnalysisResultSchema } from '@/lib/validators';
 import { truncateToTokenLimit } from '@/lib/document-chunker';
 import { scoreDocument } from '@/lib/risk-classifier';
-import { checkRateLimit, getClientIp } from '@/lib/rate-limiter';
+import { checkRateLimit, getClientIp, RATE_LIMITS } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -16,7 +16,8 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   // ── Rate limiting ────────────────────────────────────────────────────────────
   const ip = getClientIp(req);
-  const { allowed, remaining, resetInMs } = checkRateLimit(ip, 'analyze');
+  const rl = checkRateLimit(ip, 'analyze');
+  const { allowed, remaining, resetInMs, globalRemaining, globalCapacity } = rl;
   if (!allowed) {
     return NextResponse.json(
       { success: false, error: `Rate limit exceeded. Resets in ${Math.ceil(resetInMs / 1000)}s.` },
@@ -87,8 +88,10 @@ export async function POST(req: NextRequest) {
         rateLimit: {
           endpoint: 'analyze',
           remaining,
-          capacity: 10,
+          capacity: RATE_LIMITS.analyze.perMinute,
           resetInMs,
+          globalRemaining,
+          globalCapacity,
         },
       },
       { headers: { 'X-RateLimit-Remaining': String(remaining) } }

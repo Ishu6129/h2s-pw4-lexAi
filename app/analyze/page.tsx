@@ -43,16 +43,18 @@ export default function AnalyzePage() {
       setResult(data.data);
       setProcessingTime(data.data.processingTimeMs);
       setTab('summary');
+      // Fire usage event ONLY on success with full rate limit detail
       if (typeof window !== 'undefined' && data.rateLimit) {
         window.dispatchEvent(new CustomEvent('lexai-api-used', { detail: data.rateLimit }));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
+      // On error still refresh usage widget (server may have counted the request)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lexai-api-used', { detail: null }));
+      }
     } finally {
       setLoading(false);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('lexai-api-used'));
-      }
     }
   };
 

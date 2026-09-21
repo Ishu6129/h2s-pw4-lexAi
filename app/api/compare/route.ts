@@ -7,14 +7,15 @@ import { groqComplete, parseGroqJSON, GROQ_MODELS } from '@/lib/groq';
 import { SYSTEM_COMPARE, buildComparePrompt } from '@/lib/prompt-templates';
 import { CompareRequestSchema, CompareResultSchema } from '@/lib/validators';
 import { truncateToTokenLimit } from '@/lib/document-chunker';
-import { checkRateLimit, getClientIp } from '@/lib/rate-limiter';
+import { checkRateLimit, getClientIp, RATE_LIMITS } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
-  const { allowed, remaining, resetInMs } = checkRateLimit(ip, 'compare');
+  const rl = checkRateLimit(ip, 'compare');
+  const { allowed, remaining, resetInMs, globalRemaining, globalCapacity } = rl;
   if (!allowed) {
     return NextResponse.json(
       { success: false, error: `Rate limit exceeded. Resets in ${Math.ceil(resetInMs / 1000)}s.` },
@@ -65,7 +66,18 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { success: true, data: { ...validated.data, processingTimeMs: Date.now() - start } },
+      {
+        success: true,
+        data: { ...validated.data, processingTimeMs: Date.now() - start },
+        rateLimit: {
+          endpoint: 'compare',
+          remaining,
+          capacity: RATE_LIMITS.compare.perMinute,
+          resetInMs,
+          globalRemaining,
+          globalCapacity,
+        },
+      },
       { headers: { 'X-RateLimit-Remaining': String(remaining) } }
     );
   } catch (error) {

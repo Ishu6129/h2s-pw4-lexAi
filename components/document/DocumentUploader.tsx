@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, X, AlertCircle, Clipboard } from 'lucide-react';
+import { Upload, FileText, X, AlertCircle, Clipboard, ScanLine } from 'lucide-react';
 
 interface DocumentUploaderProps {
   onTextExtracted: (text: string, filename: string) => void;
@@ -10,6 +10,46 @@ interface DocumentUploaderProps {
 
 const ACCEPTED_TYPES = ['.pdf', '.docx', '.doc', '.txt', '.md', '.rtf', '.html', '.htm', '.csv', '.json'];
 const MAX_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+
+/** OCR a single canvas page using Tesseract.js */
+async function ocrPage(canvas: HTMLCanvasElement, onProgress: (p: number) => void): Promise<string> {
+  const { createWorker } = await import('tesseract.js');
+  const worker = await createWorker('eng', 1, {
+    logger: (m: { status: string; progress: number }) => {
+      if (m.status === 'recognizing text') onProgress(Math.round(m.progress * 100));
+    },
+  });
+  const { data } = await worker.recognize(canvas);
+  await worker.terminate();
+  return data.text;
+}
+
+/** OCR all pages of a PDF using pdf.js + Tesseract.js */
+async function extractTextViaOCR(
+  file: File,
+  onProgress: (msg: string) => void
+): Promise<string> {
+  const pdfjs = await import('pdfjs-dist');
+  if (typeof window !== 'undefined' && pdfjs.GlobalWorkerOptions) {
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer), useSystemFonts: true }).promise;
+  const texts: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    onProgress(`OCR page ${i}/${pdf.numPages}…`);
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 }); // higher scale = better OCR accuracy
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d')!;
+    await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+    const pageText = await ocrPage(canvas, (p) => onProgress(`OCR page ${i}/${pdf.numPages} — ${p}%`));
+    if (pageText.trim()) texts.push(pageText.trim());
+  }
+  return texts.join('\n\n');
+}
 
 /** Extract plain text from Word .docx / .doc binary buffers */
 async function extractDocxText(file: File): Promise<string> {
@@ -67,7 +107,7 @@ function extractRawPdfTextFallback(arrayBuffer: ArrayBuffer): string {
   }
 }
 
-async function extractPdfText(file: File): Promise<string> {
+async function extractPdfText(file: File, onOcrProgress?: (msg: string) => void): Promise<string> {
   try {
     const pdfjs = await import('pdfjs-dist');
     if (typeof window !== 'undefined' && pdfjs.GlobalWorkerOptions) {
@@ -94,15 +134,33 @@ async function extractPdfText(file: File): Promise<string> {
       }
     }
 
-    return pages.join('\n\n');
+    const extracted = pages.join('\n\n');
+
+    // If text layer is empty/tiny, this is a scanned PDF — run OCR
+    if (extracted.trim().length < 20 && onOcrProgress) {
+      onOcrProgress('Scanned PDF detected — starting OCR…');
+      return await extractTextViaOCR(file, onOcrProgress);
+    }
+
+    return extracted;
   } catch (err) {
     console.error('PDF parsing error:', err);
+    // Try raw binary fallback first
     try {
       const buffer = await file.arrayBuffer();
       const raw = extractRawPdfTextFallback(buffer);
       if (raw.trim().length > 30) return raw;
     } catch {
-      // ignore fallback errors
+      // ignore
+    }
+    // Last resort: OCR
+    if (onOcrProgress) {
+      try {
+        onOcrProgress('Trying OCR as fallback…');
+        return await extractTextViaOCR(file, onOcrProgress);
+      } catch (ocrErr) {
+        console.error('OCR fallback failed:', ocrErr);
+      }
     }
     throw new Error(
       'Could not extract text from PDF. If this is a scanned PDF, please paste the text directly using the "Paste text" option.'
@@ -117,6 +175,7 @@ export default function DocumentUploader({
 }: DocumentUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [showPaste, setShowPaste] = useState(false);
@@ -144,14 +203,7 @@ export default function DocumentUploader({
       try {
         let text = '';
         if (ext === '.pdf') {
-          text = await extractPdfText(file);
-          if (text.trim().length < 20) {
-            const buffer = await file.arrayBuffer();
-            const fallback = extractRawPdfTextFallback(buffer);
-            if (fallback.trim().length > text.trim().length) {
-              text = fallback;
-            }
-          }
+          text = await extractPdfText(file, (msg) => setOcrStatus(msg));
         } else if (ext === '.docx' || ext === '.doc') {
           text = await extractDocxText(file);
         } else if (ext === '.html' || ext === '.htm') {
@@ -168,6 +220,7 @@ export default function DocumentUploader({
 
         const trimmed = text.trim();
         if (trimmed.length === 0) {
+          setOcrStatus(null);
           setError(
             ext === '.pdf'
               ? 'No readable text found in this PDF. It may be a scanned image without selectable text. Click "Paste text" to enter document text manually.'
@@ -186,9 +239,11 @@ export default function DocumentUploader({
         }
 
         setFileName(file.name);
+        setOcrStatus(null);
         onTextExtracted(trimmed, file.name);
       } catch (err) {
         console.error('File extraction error:', err);
+        setOcrStatus(null);
         setError(
           err instanceof Error
             ? err.message
@@ -265,8 +320,19 @@ export default function DocumentUploader({
         <div style={{ position: 'relative', zIndex: 1 }}>
           {isProcessing ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
-              <div className="spinner" style={{ width: '32px', height: '32px', borderWidth: '3px' }} />
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Extracting document text...</p>
+              {ocrStatus ? (
+                <ScanLine size={32} style={{ color: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              ) : (
+                <div className="spinner" style={{ width: '32px', height: '32px', borderWidth: '3px' }} />
+              )}
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', maxWidth: '280px' }}>
+                {ocrStatus ?? 'Extracting document text...'}
+              </p>
+              {ocrStatus && (
+                <p style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 500 }}>
+                  🔍 Running free OCR — this may take a moment
+                </p>
+              )}
             </div>
           ) : fileName ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>

@@ -149,6 +149,9 @@ export function getUsageSnapshot(ip: string): Record<string, Omit<RateLimitResul
   const now = Date.now();
   const snapshot: Record<string, Omit<RateLimitResult, 'allowed'>> = {};
 
+  // Pre-fetch global bucket once to avoid re-creating it in every loop iteration
+  const globalBucket = getOrRefillBucket(ip, 'global');
+
   for (const key of Object.keys(RATE_LIMITS) as EndpointKey[]) {
     const bucket = getOrRefillBucket(ip, key);
     snapshot[key] = {
@@ -157,7 +160,7 @@ export function getUsageSnapshot(ip: string): Record<string, Omit<RateLimitResul
       used: bucket.used,
       resetInMs: Math.max(0, bucket.resetAt - now),
       endpoint: key,
-      globalRemaining: getOrRefillBucket(ip, 'global').tokens,
+      globalRemaining: globalBucket.tokens,
       globalCapacity: RATE_LIMITS.global.perMinute,
     };
   }
