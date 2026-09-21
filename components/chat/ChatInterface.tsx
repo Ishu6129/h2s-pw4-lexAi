@@ -8,6 +8,143 @@ interface ChatInterfaceProps {
   documentTitle: string;
 }
 
+function renderInline(text: string): React.ReactNode[] {
+  const cleanText = text.replace(/<br\s*\/?>/gi, ' ');
+  const parts = cleanText.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={idx} style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={idx}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
+
+function FormattedMessage({ content }: { content: string }) {
+  if (!content) return null;
+
+  // Pre-process: convert HTML <br> tags to newlines
+  const sanitized = content.replace(/<br\s*\/?>/gi, '\n');
+  const lines = sanitized.split('\n');
+
+  const elements: React.ReactNode[] = [];
+  let tableBuffer: string[] = [];
+  let keyIdx = 0;
+
+  const flushTable = () => {
+    if (tableBuffer.length < 2) {
+      tableBuffer.forEach((l) => {
+        if (l.trim()) {
+          elements.push(
+            <p key={`p-${keyIdx++}`} style={{ margin: '0 0 6px 0', lineHeight: 1.55 }}>
+              {renderInline(l)}
+            </p>
+          );
+        }
+      });
+      tableBuffer = [];
+      return;
+    }
+
+    const rows = tableBuffer
+      .map((row) => row.trim())
+      .filter((row) => row.startsWith('|') && row.endsWith('|'))
+      .map((row) => row.slice(1, -1).split('|').map((cell) => cell.trim()));
+
+    const validRows = rows.filter((r) => !r.every((cell) => /^:?-+:?$/.test(cell)));
+
+    if (validRows.length > 0) {
+      const header = validRows[0];
+      const body = validRows.slice(1);
+
+      elements.push(
+        <div key={`table-${keyIdx++}`} style={{ overflowX: 'auto', margin: '10px 0' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-surface-3)', borderBottom: '2px solid var(--border)' }}>
+                {header.map((col, i) => (
+                  <th key={i} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {renderInline(col)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {body.map((row, rIdx) => (
+                <tr key={rIdx} style={{ borderBottom: '1px solid var(--border)', background: rIdx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)' }}>
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    tableBuffer = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      tableBuffer.push(trimmed);
+    } else {
+      if (tableBuffer.length > 0) flushTable();
+
+      if (!trimmed) {
+        elements.push(<div key={`sp-${keyIdx++}`} style={{ height: '6px' }} />);
+      } else if (trimmed.startsWith('### ')) {
+        elements.push(
+          <h4 key={`h-${keyIdx++}`} style={{ margin: '10px 0 4px 0', fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            {renderInline(trimmed.slice(4))}
+          </h4>
+        );
+      } else if (trimmed.startsWith('## ')) {
+        elements.push(
+          <h3 key={`h-${keyIdx++}`} style={{ margin: '12px 0 6px 0', fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            {renderInline(trimmed.slice(3))}
+          </h3>
+        );
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        elements.push(
+          <li key={`li-${keyIdx++}`} style={{ marginLeft: '16px', marginBottom: '4px', listStyleType: 'disc' }}>
+            {renderInline(trimmed.slice(2))}
+          </li>
+        );
+      } else if (/^\d+\.\s/.test(trimmed)) {
+        const content = trimmed.replace(/^\d+\.\s/, '');
+        elements.push(
+          <li key={`li-${keyIdx++}`} style={{ marginLeft: '16px', marginBottom: '4px', listStyleType: 'decimal' }}>
+            {renderInline(content)}
+          </li>
+        );
+      } else {
+        elements.push(
+          <p key={`p-${keyIdx++}`} style={{ margin: '0 0 6px 0', lineHeight: 1.55 }}>
+            {renderInline(trimmed)}
+          </p>
+        );
+      }
+    }
+  }
+
+  if (tableBuffer.length > 0) flushTable();
+
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>{elements}</div>;
+}
+
 export default function ChatInterface({ documentText, documentTitle }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -63,6 +200,26 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
       if (!res.ok) throw new Error('Request failed');
       if (!res.body) throw new Error('No response body');
 
+      // Dispatch rate limit usage event with exact server header values
+      const remHeader = res.headers.get('X-RateLimit-Remaining');
+      const capHeader = res.headers.get('X-RateLimit-Capacity');
+      const resetHeader = res.headers.get('X-RateLimit-Reset');
+      const gRemHeader = res.headers.get('X-RateLimit-Global-Remaining');
+
+      if (typeof window !== 'undefined' && remHeader !== null) {
+        window.dispatchEvent(
+          new CustomEvent('lexai-api-used', {
+            detail: {
+              endpoint: 'qa',
+              remaining: Number(remHeader),
+              capacity: Number(capHeader),
+              resetInMs: Number(resetHeader),
+              globalRemaining: Number(gRemHeader),
+            },
+          })
+        );
+      }
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let currentText = '';
@@ -109,9 +266,6 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
       );
       setIsStreaming(false);
       inputRef.current?.focus();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('lexai-api-used'));
-      }
     }
   };
 
@@ -167,7 +321,11 @@ export default function ChatInterface({ documentText, documentTitle }: ChatInter
               className={`chat-bubble chat-bubble--${msg.role}${msg.isStreaming ? ' typewriter' : ''}`}
               aria-label={`${msg.role === 'user' ? 'You' : 'Assistant'}: ${msg.content}`}
             >
-              {msg.content || (msg.isStreaming && <span style={{ color: 'var(--text-muted)' }}>Thinking…</span>)}
+              {msg.content ? (
+                <FormattedMessage content={msg.content} />
+              ) : (
+                msg.isStreaming && <span style={{ color: 'var(--text-muted)' }}>Thinking…</span>
+              )}
             </div>
           </div>
         ))}

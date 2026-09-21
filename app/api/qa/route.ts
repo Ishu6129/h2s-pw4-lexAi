@@ -7,7 +7,7 @@ import { groqStream } from '@/lib/groq';
 import { buildQASystemPrompt, buildQAUserPrompt } from '@/lib/prompt-templates';
 import { QARequestSchema } from '@/lib/validators';
 import { truncateToTokenLimit } from '@/lib/document-chunker';
-import { checkRateLimit, getClientIp } from '@/lib/rate-limiter';
+import { checkRateLimit, getClientIp, RATE_LIMITS } from '@/lib/rate-limiter';
 import { GROQ_MODELS } from '@/lib/groq';
 
 export const runtime = 'nodejs';
@@ -15,7 +15,7 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
-  const { allowed, resetInMs } = checkRateLimit(ip, 'qa');
+  const { allowed, remaining, resetInMs, globalRemaining, globalCapacity } = checkRateLimit(ip, 'qa');
   if (!allowed) {
     return new Response(JSON.stringify({ success: false, error: `Rate limit exceeded. Resets in ${Math.ceil(resetInMs / 1000)}s.` }), {
       status: 429,
@@ -78,6 +78,11 @@ export async function POST(req: NextRequest) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      'X-RateLimit-Remaining': String(remaining),
+      'X-RateLimit-Capacity': String(RATE_LIMITS.qa.perMinute),
+      'X-RateLimit-Reset': String(resetInMs),
+      'X-RateLimit-Global-Remaining': String(globalRemaining),
+      'X-RateLimit-Global-Capacity': String(globalCapacity),
     },
   });
 }

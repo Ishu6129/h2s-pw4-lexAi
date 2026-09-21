@@ -7,14 +7,14 @@ import { groqComplete, parseGroqJSON, GROQ_MODELS } from '@/lib/groq';
 import { SYSTEM_CHECKLIST, buildChecklistPrompt } from '@/lib/prompt-templates';
 import { ChecklistRequestSchema } from '@/lib/validators';
 import { truncateToTokenLimit } from '@/lib/document-chunker';
-import { checkRateLimit } from '@/lib/rate-limiter';
+import { checkRateLimit, getClientIp, RATE_LIMITS } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0] ?? 'unknown';
-  const { allowed } = checkRateLimit(ip, 'checklist');
+  const ip = getClientIp(req);
+  const { allowed, remaining, resetInMs, globalRemaining, globalCapacity } = checkRateLimit(ip, 'checklist');
   if (!allowed) {
     return NextResponse.json({ success: false, error: 'Rate limit exceeded.' }, { status: 429 });
   }
@@ -46,7 +46,18 @@ export async function POST(req: NextRequest) {
     );
 
     const result = parseGroqJSON<{ checklist: unknown[] }>(raw);
-    return NextResponse.json({ success: true, data: result });
+    return NextResponse.json({
+      success: true,
+      data: result,
+      rateLimit: {
+        endpoint: 'checklist',
+        remaining,
+        capacity: RATE_LIMITS.checklist.perMinute,
+        resetInMs,
+        globalRemaining,
+        globalCapacity,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Checklist generation failed';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
